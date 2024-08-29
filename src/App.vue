@@ -134,7 +134,6 @@ onMounted(() => {
 // 取得所有待辦事項
 const getAllTodos = async () => {
   try {
-    await checkout()
     const token = getToken()
     if (token) {
       const res = await axios.get(`${apiBaseUrl}/todos/`, {
