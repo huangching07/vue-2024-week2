@@ -2,8 +2,8 @@
 import axios from 'axios'
 import { onMounted, ref } from 'vue'
 
-const apiBase = 'https://todolist-api.hexschool.io'
-const token = ref('')
+const apiBaseUrl = 'https://todolist-api.hexschool.io'
+const tokenValue = ref('')
 const data = ref([])
 
 // 註冊
@@ -17,7 +17,7 @@ const signUpMsg = ref('')
 
 const signUp = async () => {
   try {
-    const res = await axios.post(`${apiBase}/users/sign_up`, signUpFields.value)
+    const res = await axios.post(`${apiBaseUrl}/users/sign_up`, signUpFields.value)
     signUpMsg.value = '註冊成功!'
     signUpFields.value = {
       email: '',
@@ -39,24 +39,25 @@ const signInMsg = ref('')
 
 const signIn = async () => {
   try {
-    const res = await axios.post(`${apiBase}/users/sign_in`, signInFields.value)
+    const res = await axios.post(`${apiBaseUrl}/users/sign_in`, signInFields.value)
     signInMsg.value = '登入成功!'
     signInFields.value = {
       email: '',
       password: ''
     }
 
-    token.value = res.data.token
-
     // 設定token到期時間
     const now = new Date()
     const expire = now.setMinutes(now.getMinutes() + 30)
 
     // 將token存在cookie
-    document.cookie = `todoToken=${token.value}; expires=${new Date(expire).toUTCString()}`
+    document.cookie = `todoToken=${res.data.token}; expires=${new Date(expire).toUTCString()}`
 
     // 取得所有待辦事項
     getAllTodos()
+
+    // 用於顯示token值
+    tokenValue.value = getToken()
   } catch (error) {
     signInMsg.value = error.response.data.message
   }
@@ -66,21 +67,18 @@ const signIn = async () => {
 const checkoutMsg = ref('')
 const checkout = async () => {
   try {
-    checkToken()
-    console.log('token', token.value)
-    if (token.value) {
-      const res = await axios.get(`${apiBase}/users/checkout`, {
+    const token = getToken()
+    if (token) {
+      const res = await axios.get(`${apiBaseUrl}/users/checkout`, {
         headers: {
-          Authorization: token.value
+          Authorization: token
         }
       })
-      console.log(res)
       checkoutMsg.value = '驗證成功!'
     } else {
       checkoutMsg.value = '請重新登入!'
     }
   } catch (error) {
-    console.log(error)
     checkoutMsg.value = error.response.data.message
   }
 }
@@ -90,39 +88,45 @@ const signOutMsg = ref('')
 
 const signOut = async () => {
   try {
-    checkToken()
+    const token = getToken()
 
-    if (token.value) {
-      const res = await axios.post(`${apiBase}/users/sign_out`, null, {
+    if (token) {
+      const res = await axios.post(`${apiBaseUrl}/users/sign_out`, null, {
         headers: {
-          Authorization: token.value
+          Authorization: token
         }
       })
       signOutMsg.value = res.data.message
-      token.value = ''
-      document.cookie = `todoToken=${token.value}`
+
+      // 設定token到期時間
+      const now = new Date()
+      const expire = now.setMinutes(now.getMinutes() - 1)
+
+      // 刪除token
+      document.cookie = `todoToken=${token}; expires=${new Date(expire).toUTCString()}`
+
+      // 移除顯示token
+      tokenValue.value = ''
+    } else {
+      signOutMsg.value = '請重新登入!'
     }
   } catch (error) {
     signOutMsg.value = error.response.data.message
   }
 }
 
-const checkToken = () => {
-  const tokenValue = document.cookie
+// 取得token值
+const getToken = () => {
+  const token = document.cookie
     .split('; ')
     .find((row) => row.startsWith('todoToken='))
     ?.split('=')[1]
-
-  if (tokenValue) {
-    token.value = tokenValue
-  } else {
-    token.value = ''
-  }
+  return token
 }
 
 onMounted(() => {
-  checkToken()
-  if (token.value) {
+  const token = getToken()
+  if (token) {
     getAllTodos()
   }
 })
@@ -130,14 +134,14 @@ onMounted(() => {
 // 取得所有待辦事項
 const getAllTodos = async () => {
   try {
-    checkToken()
-    if (token.value) {
-      const res = await axios.get(`${apiBase}/todos/`, {
+    await checkout()
+    const token = getToken()
+    if (token) {
+      const res = await axios.get(`${apiBaseUrl}/todos/`, {
         headers: {
-          Authorization: token.value
+          Authorization: token
         }
       })
-      console.log(res)
       data.value = res.data.data
     } else {
       alert('請重新登入!')
@@ -147,24 +151,27 @@ const getAllTodos = async () => {
   }
 }
 
+// 新增一筆待辦事項
 const newTodoItem = ref('')
 
 const addNewTodoItem = async () => {
+  if (!newTodoItem.value) {
+    return
+  }
   try {
-    checkToken()
-    if (token.value) {
+    const token = getToken()
+    if (token) {
       const res = await axios.post(
-        `${apiBase}/todos/`,
+        `${apiBaseUrl}/todos/`,
         {
           content: newTodoItem.value
         },
         {
           headers: {
-            Authorization: token.value
+            Authorization: token
           }
         }
       )
-      console.log(res)
       newTodoItem.value = ''
       getAllTodos()
     } else {
@@ -176,24 +183,45 @@ const addNewTodoItem = async () => {
 }
 
 // 修改單筆待辦事項
-const editTodoItem = ref('')
-const updateTodoItem = async (id) => {
+const editTodoItem = ref({
+  id: '',
+  content: ''
+})
+
+const resetEditTodoItem = () => {
+  editTodoItem.value = {
+    id: '',
+    content: ''
+  }
+}
+
+const updateTodoItem = (id) => {
+  const index = data.value.findIndex((item) => item.id === id)
+  editTodoItem.value.id = id
+  editTodoItem.value.content = data.value[index].content
+}
+
+const cancelUpdateTodoItem = () => {
+  resetEditTodoItem()
+}
+
+const confirmUpdateTodoItem = async () => {
   try {
-    checkToken()
-    if (token.value) {
+    const token = getToken()
+    if (token) {
       const res = await axios.put(
-        `${apiBase}/todos/${id}`,
+        `${apiBaseUrl}/todos/${editTodoItem.value.id}`,
         {
-          content: editTodoItem.value
+          content: editTodoItem.value.content
         },
         {
           headers: {
-            Authorization: token.value
+            Authorization: token
           }
         }
       )
-      console.log(res)
       getAllTodos()
+      resetEditTodoItem()
     } else {
       alert('請重新登入!')
     }
@@ -205,14 +233,13 @@ const updateTodoItem = async (id) => {
 // 刪除單筆待辦事項
 const deleteTodoItem = async (id) => {
   try {
-    checkToken()
-    if (token.value) {
-      const res = await axios.delete(`${apiBase}/todos/${id}`, {
+    const token = getToken()
+    if (token) {
+      const res = await axios.delete(`${apiBaseUrl}/todos/${id}`, {
         headers: {
-          Authorization: token.value
+          Authorization: token
         }
       })
-      console.log(res)
       getAllTodos()
     } else {
       alert('請重新登入!')
@@ -225,12 +252,12 @@ const deleteTodoItem = async (id) => {
 // 更新單筆待辦事項狀態
 const updateTodoItemStatus = async (id) => {
   try {
-    const res = await axios.patch(`${apiBase}/todos/${id}/toggle`, null, {
+    const token = getToken()
+    const res = await axios.patch(`${apiBaseUrl}/todos/${id}/toggle`, null, {
       headers: {
-        Authorization: token.value
+        Authorization: token
       }
     })
-    console.log(res)
     getAllTodos()
   } catch (error) {
     console.log(error)
@@ -266,7 +293,7 @@ const updateTodoItemStatus = async (id) => {
 
   <h2>驗證</h2>
   <label for="validationToken">Token: </label>
-  <input type="text" id="validationToken" placeholder="Token" :value="token" disabled />
+  <input type="text" id="validationToken" placeholder="Token" :value="tokenValue" disabled />
   <br />
   <button type="button" @click="checkout">驗證</button>
   <br />
@@ -274,40 +301,46 @@ const updateTodoItemStatus = async (id) => {
 
   <h2>登出</h2>
   <label for="signOutToken">Token: </label>
-  <input type="text" id="signOutToken" placeholder="Token" :value="token" disabled />
+  <input type="text" id="signOutToken" placeholder="Token" :value="tokenValue" disabled />
   <br />
   <button type="button" @click="signOut">登出</button>
   <br />
   {{ signOutMsg }}
 
   <hr />
-  <h2>Todo List</h2>
-  {{ data }}
-  <br />
-  <input type="text" placeholder="待辦事項" v-model="newTodoItem" />
-  <button type="button" @click="addNewTodoItem">新增待辦事項</button>
-  <br />
-  <table>
-    <thead>
-      <tr>
-        <th>狀態</th>
-        <th>待辦事項</th>
-        <th>動作</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-for="item in data" :key="item.id">
-        <td>{{ item.status }}</td>
-        <td>{{ item.content }}</td>
-        <td>
-          <input type="text" v-model="editTodoItem" />
-          <button type="button" @click="updateTodoItem(item.id)">更新待辦事項</button>
-          <button type="button" @click="deleteTodoItem(item.id)">刪除待辦事項</button>
-          <button type="button" @click="updateTodoItemStatus(item.id)">修改待辦事項狀態</button>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <div v-if="tokenValue">
+    <h2>Todo List</h2>
+    <input type="text" placeholder="待辦事項" v-model="newTodoItem" />
+    <button type="button" @click="addNewTodoItem">新增待辦事項</button>
+    <br />
+    <table>
+      <thead>
+        <tr>
+          <th>狀態</th>
+          <th>待辦事項</th>
+          <th>動作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in data" :key="item.id">
+          <td>{{ item.status ? '完成' : '未完成' }}</td>
+          <td>{{ item.content }}</td>
+          <td>
+            <span v-if="editTodoItem.id === item.id">
+              <input type="text" v-model="editTodoItem.content" />
+              <button type="button" @click="cancelUpdateTodoItem()">取消</button>
+              <button type="button" @click="confirmUpdateTodoItem()">確認</button>
+            </span>
+            <span v-else>
+              <button type="button" @click="updateTodoItem(item.id)">更新待辦事項</button>
+            </span>
+            <button type="button" @click="deleteTodoItem(item.id)">刪除待辦事項</button>
+            <button type="button" @click="updateTodoItemStatus(item.id)">修改待辦事項狀態</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </template>
 
 <style scoped></style>
